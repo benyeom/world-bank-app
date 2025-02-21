@@ -4,13 +4,12 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from pandas_datareader import wb
 
-
-app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = Dash(__name__, external_stylesheets=[dbc.themes.MINTY])
 
 indicators = {
     "IT.NET.USER.ZS": "Individuals using the Internet (% of population)",
     "SG.GEN.PARL.ZS": "Proportion of seats held by women in national parliaments (%)",
-    "EN.ATM.CO2E.KT": "CO2 emissions (kt)",
+    "EN.GHG.CO2.ZG.AR5": "Carbon dioxide (CO2) emissions (total) excluding LULUCF (% change from 1990)",
 }
 
 # get country name and ISO id for mapping on choropleth
@@ -18,7 +17,7 @@ countries = wb.get_countries()
 countries["capitalCity"].replace({"": None}, inplace=True)
 countries.dropna(subset=["capitalCity"], inplace=True)
 countries = countries[["name", "iso3c"]]
-countries = countries[countries["name"] != "Kosovo"]
+countries = countries[(countries["name"] != "Kosovo") & (countries["name"] != "Korea, Dem. People's Rep.")]
 countries = countries.rename(columns={"name": "country"})
 
 
@@ -28,6 +27,7 @@ def update_wb_data():
         indicator=(list(indicators)), country=countries["iso3c"], start=2005, end=2016
     )
     df = df.reset_index()
+    print(df)
     df.year = df.year.astype(int)
 
     # Add country ISO3 id to main df
@@ -45,31 +45,34 @@ app.layout = dbc.Container(
                         "Comparison of World Bank Country Data",
                         style={"textAlign": "center"},
                     ),
+                    html.H2(
+                        "Date",
+                        style={"textAlign": "center"},
+                    ),
                     dcc.Graph(id="my-choropleth", figure={}),
                 ],
                 width=12,
             )
         ),
         dbc.Row(
-            dbc.Col(
-                [
-                    dbc.Label(
-                        "Select Data Set:",
-                        className="fw-bold",
-                        style={"textDecoration": "underline", "fontSize": 20},
-                    ),
-                    dcc.RadioItems(
-                        id="radio-indicator",
-                        options=[{"label": i, "value": i} for i in indicators.values()],
-                        value=list(indicators.values())[0],
-                        inputClassName="me-2",
-                    ),
-                ],
-                width=4,
-            )
-        ),
-        dbc.Row(
             [
+                dbc.Col(
+                    [
+                        dbc.Label(
+                            "Select Data Set:",
+                            className="fw-bold",
+                            style={"textDecoration": "underline", "fontSize": 20},
+                        ),
+                        dcc.Dropdown(
+                            id="dropdown-indicator",
+                            options=[{"label": i, "value": i} for i in indicators.values()],
+                            value=list(indicators.values())[0],
+                            clearable=False,
+                            style={"width": "100%"},
+                        ),
+                    ],
+                    width=6,
+                ),
                 dbc.Col(
                     [
                         dbc.Label(
@@ -98,36 +101,58 @@ app.layout = dbc.Container(
                                 2016: "2016",
                             },
                         ),
-                        dbc.Button(
-                            id="my-button",
-                            children="Submit",
-                            n_clicks=0,
-                            color="primary",
-                            className="mt-4",
-                        ),
                     ],
                     width=6,
                 ),
-            ]
+                dbc.Col(
+                    html.Div(
+                        [
+                            html.Span("Clicks: ", style={"margin-right": "1px"}),
+                            html.Span("0", id="click-counter", style={"fontWeight": "bold"}),
+                            dbc.Button(
+                                id="my-button",
+                                children="Submit",
+                                n_clicks=0,
+                                color="primary",
+                                className="mt-4 fw-bold",
+                                style={"margin-left": "10px"},
+                            ),
+                        ],
+                        style={"display": "inline-block", "margin-right": "15px"},
+                    ),
+                    width=2,
+                    className="d-flex justify-content-end align-items-end",
+                ),
+            ],
+            className="my-4",
         ),
         dcc.Store(id="storage", storage_type="session", data={}),
         dcc.Interval(id="timer", interval=1000 * 60, n_intervals=0),
     ]
 )
 
+@app.callback(Output("years-range", "value"), Input("my-button", "n_clicks"), State("years-range", "value"))
+def update_slider(n_clicks, current_slider_value):
+    if n_clicks > 0:
+        new_end = min(current_slider_value[1] + 1, 2016)
+        return [current_slider_value[0], new_end]
+    return current_slider_value
+
+@app.callback(Output("click-counter", "children"), Input("my-button", "n_clicks"))
+def update_click_counter(n_clicks):
+    return str(n_clicks)
 
 @app.callback(Output("storage", "data"), Input("timer", "n_intervals"))
 def store_data(n_time):
     dataframe = update_wb_data()
     return dataframe.to_dict("records")
 
-
 @app.callback(
     Output("my-choropleth", "figure"),
     Input("my-button", "n_clicks"),
     Input("storage", "data"),
     State("years-range", "value"),
-    State("radio-indicator", "value"),
+    State("dropdown-indicator", "value"),
 )
 def update_graph(n_clicks, stored_dataframe, years_chosen, indct_chosen):
     dff = pd.DataFrame.from_records(stored_dataframe)
